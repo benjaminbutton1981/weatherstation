@@ -1,0 +1,624 @@
+//____________________________________________________________________________________________________________________
+
+//		Weather Station
+// This board interfaces with XBEE (rs232), temp-hum sensor (SPI), rain guage (adc), widvel (digital ip), dir sensor (adc)
+//____________________________________________________________________________________________________________________
+
+// Device in use PIC 18f4480
+// Crystal Speed = 10 MHz
+// Program memory 0x0000 to 0x2000 (8K)
+//____________________________________________________________________________________________________________________
+
+//--------------------------------------------------------------------------------------------------------------------
+//	Include files
+
+#include "p18f4480.h"
+
+//#include <sw_spi.h>
+//#include <stdio.h>
+//#include <stdlib.h>
+//#include <math.h>
+//--------------------------------------------------------------------------------------------------------------------
+
+
+//--------------------------------------------------------------------------------------------------------------------
+// PIC18F4480 Configuration Bit Settings
+//--------------------------------------------------------------------------------------------------------------------
+
+// CONFIG1H
+#pragma config OSC = HS         // Oscillator Selection bits (HS oscillator)
+#pragma config FCMEN = OFF      // Fail-Safe Clock Monitor Enable bit (Fail-Safe Clock Monitor disabled)
+#pragma config IESO = OFF       // Internal/External Oscillator Switchover bit (Oscillator Switchover mode disabled)
+
+// CONFIG2L
+#pragma config PWRT = OFF       // Power-up Timer Enable bit (PWRT disabled)
+#pragma config BOREN = OFF      // Brown-out Reset Enable bits (Brown-out Reset disabled in hardware and software)
+#pragma config BORV = 3         // Brown-out Reset Voltage bits (VBOR set to 2.1V)
+
+// CONFIG2H
+#pragma config WDT = OFF        // Watchdog Timer Enable bit (WDT disabled (control is placed on the SWDTEN bit))
+#pragma config WDTPS = 32768    // Watchdog Timer Postscale Select bits (1:32768)
+
+// CONFIG3H
+#pragma config PBADEN = OFF     // PORTB A/D Enable bit (PORTB<4:0> pins are configured as digital I/O on Reset)
+#pragma config LPT1OSC = OFF    // Low-Power Timer 1 Oscillator Enable bit (Timer1 configured for higher power operation)
+#pragma config MCLRE = ON       // MCLR Pin Enable bit (MCLR pin enabled; RE3 input pin disabled)
+
+// CONFIG4L
+#pragma config STVREN = ON      // Stack Full/Underflow Reset Enable bit (Stack full/underflow will cause Reset)
+#pragma config LVP = OFF        // Single-Supply ICSP Enable bit (Single-Supply ICSP disabled)
+#pragma config BBSIZ = 1024     // Boot Block Size Select bit (1K words (2K bytes) boot block)
+#pragma config XINST = OFF      // Extended Instruction Set Enable bit (Instruction set extension and Indexed Addressing mode disabled (Legacy mode))
+
+// CONFIG5L
+#pragma config CP0 = OFF        // Code Protection bit (Block 0 (000800-001FFFh) not code-protected)
+#pragma config CP1 = OFF        // Code Protection bit (Block 1 (002000-003FFFh) not code-protected)
+
+// CONFIG5H
+#pragma config CPB = OFF        // Boot Block Code Protection bit (Boot block (000000-0007FFh) not code-protected)
+#pragma config CPD = OFF        // Data EEPROM Code Protection bit (Data EEPROM not code-protected)
+
+// CONFIG6L
+#pragma config WRT0 = OFF       // Write Protection bit (Block 0 (000800-001FFFh) not write-protected)
+#pragma config WRT1 = OFF       // Write Protection bit (Block 1 (002000-003FFFh) not write-protected)
+
+// CONFIG6H
+#pragma config WRTC = OFF       // Configuration Register Write Protection bit (Configuration registers (300000-3000FFh) not write-protected)
+#pragma config WRTB = OFF       // Boot Block Write Protection bit (Boot block (000000-0007FFh) not write-protected)
+#pragma config WRTD = OFF       // Data EEPROM Write Protection bit (Data EEPROM not write-protected)
+
+// CONFIG7L
+#pragma config EBTR0 = OFF      // Table Read Protection bit (Block 0 (000800-001FFFh) not protected from table reads executed in other blocks)
+#pragma config EBTR1 = OFF      // Table Read Protection bit (Block 1 (002000-003FFFh) not protected from table reads executed in other blocks)
+
+// CONFIG7H
+#pragma config EBTRB = OFF      // Boot Block Table Read Protection bit (Boot block (000000-0007FFh) not protected from table reads executed in other blocks)
+
+//--------------------------------------------------------------------------------------------------------------------
+									//	Definitions
+//--------------------------------------------------------------------------------------------------------------------
+
+#define WEATHER40 20
+#define DATABUFF 10
+#define ascii 48
+//#define ascii 0
+
+//--------------------------------------------------------------------------------------------------------------------
+
+
+//--------------------------------------------------------------------------------------------------------------------
+									//	GLOBAL VARIABLES
+//--------------------------------------------------------------------------------------------------------------------
+unsigned char char_send_count = 0;
+unsigned char char_send_time = 0;
+unsigned char char_counter=0;
+unsigned char char_sample_ready =0; 
+
+unsigned char char_sample_time = 0;               //time interval in sec at which data is sent
+
+unsigned char wind_vel_buffer[DATABUFF];    //wind vel data buffer 10 bytes
+unsigned char wind_dir_buffer[DATABUFF];    //wind dir data buffer 10 bytes
+unsigned char rain_buffer[DATABUFF];        //rain data buffer 10 bytes
+unsigned char temp_buffer[DATABUFF*2];      //temperature data buffer 10+10 bytes = 10 words
+unsigned char hum_buffer[DATABUFF*2];       //humidity data buffer 10+10 bytes = 10 words
+//---------------------------------------------------------------------------------------------------------------------
+
+
+
+//--------------------------------------------------------------------------------------------------------------------
+									//	Function Prototypes
+//--------------------------------------------------------------------------------------------------------------------
+void main(void) ;
+void init(void);
+void rs232_init(void) ;
+void can_init(void);
+void ssp_init(void);
+void i2c_init(void);
+void setint(void) ;
+void delay(void);
+void rs232(char);
+void bcd_io(void);
+void bin_io(void);
+void InterruptHandlerHigh (void);
+void InterruptHandlerLow (void);
+//--------------------------------------------------------------------------------------------------------------------
+
+
+//--------------------------------------------------------------------------------------------------------------------
+									// Main Program
+//--------------------------------------------------------------------------------------------------------------------
+void main()
+{
+
+    init();
+    rs232_init() ;
+    can_init();
+    ssp_init();
+    setint() ;
+
+    while(1)
+    {
+
+    }
+}
+
+void init()
+{
+
+//	ADCON1 = 0X0F;
+    CMCON = 0X07;
+
+    //TIMER0 CONTROL REGISTER
+    //T0CONbits.TMR0ON = 0 ;	//Timer0 Off
+    //T0CONbits.T016BIT = 0 ;	//1 = Timer0 is configured as an 8-bit timer/counter, 0 means 16 bit
+    //T0CONbits.T0CS = 0 ;	//Internal instruction cycle clock
+    //T0CONbits.T0SE = 0 ; 	//Increment on low-to-high transition on T0CKI pin (not use here)
+    //T0CONbits.PSA =	0 ;	//Timer0 prescaler is assigned. Timer0 clock input comes from prescaler output
+    //T0CONbits.T0PS2 = 0 ;     //Prescale value 1:2 (options 1:2,4,8,16,32,64,128,256)
+    //T0CONbits.T0PS1 = 0 ;
+    //T0CONbits.T0PS0 = 0 ;
+    T0CON = 0X00 ;
+    TMR0H = 0xCF ;
+    TMR0L = 0xC2 ;
+    //Timer0 interrupt set to (inverse of 2500000/64/256) = 3.2768 ms
+    //Timer0 is used for encoder interfacing
+
+    //TIMER1 CONTROL REGISTER
+    //T1CONbits.RD16 = 0 ;	//1 = Enables register read/write of TImer1 in one 16-bit operation
+    //T1CONbits.T1RUN = 0 ;	//0 = System clock is derived from another source
+    //T1CONbits.T1CKPS1 = 1 ;	//1:8 Prescale value (options 1:1, 1:2, 1:4, 1:8)
+    //T1CONbits.T1CKPS0 = 1 ;
+    //T1CONbits.T1OSCEN = 0 ; 	//Timer1 Oscillator Enable bit
+    //T1CONbits.T1SYNC = 1; 	//Do not synchronize external clock input
+    //T1CONbits.TMR1CS = 0 ;	//Internal clock (FOSC/4)
+    //T1CONbits.TMR1ON = 0 ;	//Timer1 disabled
+    T1CON = 0X34 ;
+
+    //OFFSET by 3036 = 65535-62499, so that interrupt is raised at 200 ms
+    TMR1H = 0x00 ;
+    TMR1L = 0x06 ;
+    //Timer1 interrupt set to (inverse of 2500000/8/(62499+1)) = 200 ms
+    //Timer1 is used for serial transmit
+
+    //TIMER2 CONTROL REGISTER
+    //T2CONbits.7 = x ;
+    //T2CONbits.T2OUTPS3 = 0 ;	//
+    //T2CONbits.T2OUTPS3 = 0 ;	//1:1 to 1:16 Postscale
+    //T2CONbits.T2OUTPS3 = 0 ;
+    //T2CONbits.T2OUTPS3 = 0 ;
+    //T2CONbits.TMR2ON = 0 ;	//Timer2 disabled
+    //T2CONbits.T2CKPS1 = 0 ;   // 1:1,1:4,1:16 prescalers (00,01,1x)
+    //T2CONbits.T2CKPS1 = 0 ;
+   // T2CON = 0X34 ;
+    //PR2 = 0 ; //period match register
+
+
+}
+
+void rs232_init()
+{
+//  init_RS232 ;
+    TRISCbits.TRISC7 = 1 ;
+    TRISCbits.TRISC6 = 0 ;
+
+    TXSTA = 0b10100100 ;
+    RCSTA = 0b10010000 ;
+    BAUDCON = 0b00000000 ;
+    //SPBRG = 255 ;
+    SPBRG = 31 ;
+}
+
+void can_init(void)
+{
+    //Receive and Transmit Pins
+    TRISB &= 0xF3 ; //RB2 is transmit
+    TRISB |= 0x08 ; //RB3 is receive
+
+    //CANCON: CAN CONTROL REGISTER
+    //MODE0 : REQOP2 REQOP1 REQOP0 ABAT WIN2 WIN1 WIN0 —
+    //MODE1 : REQOP2 REQOP1 REQOP0 ABAT — — — —
+    //MODE2 : REQOP2 REQOP1 REQOP0 ABAT FP3 FP2 FP1 FP0
+    CANCONbits.REQOP2 = 1 ;		//Request CAN Operation Mode bits
+    CANCONbits.REQOP1 = 0 ;		//1xx configuration mode
+    CANCONbits.REQOP0 = 0 ;
+    CANCONbits.ABAT   = 1 ;		//1 = Abort all pending transmissions
+    CANCONbits.WIN2   = 1 ;		//WIN2:WIN0: Window Address bits
+    CANCONbits.WIN1   = 0 ;		//100 = Transmit Buffer 0
+    CANCONbits.WIN0   = 0 ;
+
+    //CANSTAT: CAN STATUS REGISTER
+    //MODE0
+    //OPMODE2 OPMODE1 OPMODE0 — ICODE3 ICODE2 ICODE1 —
+    while(!CANSTATbits.OPMODE2) ;
+
+    TXB0DLC = 0x08 ;
+
+    //ECANCON: ENHANCED CAN CONTROL REGISTER
+    //MDSEL1 MDSEL0 FIFOWM EWIN4 EWIN3 EWIN2 EWIN1 EWIN0
+    ECANCONbits.MDSEL1 = 0 ; 	//MDSEL1:MDSEL0: Mode Select bits
+    ECANCONbits.MDSEL0 = 0 ; 	//00 = Legacy mode (Mode 0, default)
+    ECANCONbits.FIFOWM = 0 ; 	//0 = Will cause FIFO interrupt when four receive buffers remain
+    ECANCONbits.EWIN4  = 0 ;	//Mode 0:Unimplemented
+    ECANCONbits.EWIN3  = 0 ;
+    ECANCONbits.EWIN2  = 0 ;
+    ECANCONbits.EWIN1  = 0 ;
+    ECANCONbits.EWIN0  = 0 ;
+
+    //Baud Rate
+    //BRGCON1: BAUD RATE CONTROL REGISTER 1
+    //SJW1 SJW0 BRP5 BRP4 BRP3 BRP2 BRP1 BRP0
+    BRGCON1bits.SJW1 = 0 ;		//Synchronization jump width time = 1 x TQ
+    BRGCON1bits.SJW0 = 0 ;
+    BRGCON1bits.BRP5 = 0 ; 		//Baud Rate Prescaler bits, 000001 = TQ = (2 x 2)/FOSC
+    BRGCON1bits.BRP4 = 0 ;
+    BRGCON1bits.BRP3 = 0 ;
+    BRGCON1bits.BRP2 = 0 ;
+    BRGCON1bits.BRP1 = 0 ;
+    BRGCON1bits.BRP0 = 0 ;
+
+    //BRGCON2: BAUD RATE CONTROL REGISTER 2
+    //SEG2PHTS SAM SEG1PH2 SEG1PH1 SEG1PH0 PRSEG2 PRSEG1 PRSEG0
+    BRGCON2bits.SEG2PHTS = 1 ; 	//1 = Freely programmable
+    BRGCON2bits.SAM      = 0 ;	//0 = Bus line is sampled once at the sample point
+    BRGCON2bits.SEG1PH2  = 0 ;	//101 = Phase Segment 1 time = 6 x TQ
+    BRGCON2bits.SEG1PH1  = 0 ;
+    BRGCON2bits.SEG1PH0  = 0 ;
+    BRGCON2bits.PRSEG2   = 0 ;	//101 = Phase Segment 1 time = 6 x TQ
+    BRGCON2bits.PRSEG1   = 0 ;
+    BRGCON2bits.PRSEG0   = 0 ;
+
+    //BRGCON3: BAUD RATE CONTROL REGISTER 3
+    //WAKDIS WAKFIL — — — SEG2PH2 SEG2PH1 SEG2PH0
+    BRGCON3bits.WAKDIS  = 0 ;	//0 = Enable CAN bus activity wake-up feature
+    BRGCON3bits.WAKFIL  = 0 ; 	//0 = CAN bus line filter is not used for wake-up
+    BRGCON3bits.SEG2PH2	= 0 ;	//110 = Phase Segment 2 time = 7 x TQ
+    BRGCON3bits.SEG2PH1 = 0 ;
+    BRGCON3bits.SEG2PH0 = 1 ;
+
+    //CIOCON: CAN I/O CONTROL REGISTER
+    //— — ENDRHI(1) CANCAP — — — —
+    CIOCONbits.ENDRHI = 1;      // 1 = CANTX pin will drive VDD when recessive
+                                // 0 = CANTX pin will be tri-state when recessive
+    //CIOCONbits.CANCAP = 0;
+
+    //COMSTAT: COMMUNICATION STATUS REGISTER
+    //Mode 0
+    //RXB0OVFL RXB1OVFL TXBO TXBP RXBP TXWARN RXWARN EWARN
+
+    //Transmit Registers-------------
+    //TXBnCON: TRANSMIT BUFFER n CONTROL REGISTERS [0 = n = 2]
+
+    //TXBnSIDH: TRANSMIT BUFFER n STANDARD IDENTIFIER REGISTERS
+
+    //TXBnSIDL: TRANSMIT BUFFER n STANDARD IDENTIFIER REGISTERS
+
+    //TXBnEIDH: TRANSMIT BUFFER n EXTENDED IDENTIFIER REGISTERS
+
+    //TXBnEIDL: TRANSMIT BUFFER n EXTENDED IDENTIFIER REGISTERS
+
+    //TXBnDm: TRANSMIT BUFFER n DATA FIELD BYTE m REGISTERS
+
+    //TXBnDLC: TRANSMIT BUFFER n DATA LENGTH CODE REGISTERS
+
+    //TXERRCNT: TRANSMIT ERROR COUNT REGISTER
+
+    //Filters and Masks
+    //RXBnSIDL: RECEIVE BUFFER n STANDARD IDENTIFIER REGISTERS
+    //SID2 SID1 SID0 SRR EXID — EID17 EID16
+    RXB0SIDL = 0 ;
+
+    //RXBnSIDH: RECEIVE BUFFER n STANDARD IDENTIFIER REGISTERS
+    //SID10 SID9 SID8 SID7 SID6 SID5 SID4 SID3
+    RXB0SIDH = 0 ;
+
+    //RXBnEIDL: RECEIVE BUFFER n EXTENDED IDENTIFIER REGISTERS
+    //EID7 EID6 EID5 EID4 EID3 EID2 EID1 EID0
+    RXB0EIDL = 0 ;
+
+    //RXBnEIDH: RECEIVE BUFFER n EXTENDED IDENTIFIER REGISTERS
+    //EID15 EID14 EID13 EID12 EID11 EID10 EID9 EID8
+    RXB0EIDH = 0 ;
+
+
+    //RXFnSIDL: RECEIVE ACCEPTANCE FILTER n STANDARD IDENTIFIER FILTER
+    //SID2 SID1 SID0 — EXIDEN — EID17 EID16
+    RXF0SIDL = 0 ;
+
+    //Receive Registers-------------
+    //RXB0CON: RECEIVE BUFFER 0 CONTROL REGISTER
+    //Mode 0
+    //RXFUL RXM1 RXM0 — RXRTRRO RXB0DBEN JTOFF FILHIT0
+    RXB0CONbits.RXFUL = 0 ; 	//0 = Receive buffer is open to receive a new message
+    RXB0CONbits.RXM1  = 1 ; 	//11 = Receive all messages (including those with errors); filter criteria is ignored
+    RXB0CONbits.RXM0 = 1 ;
+    RXB0CONbits.RXB0DBEN = 0 ;	//0 = No Receive Buffer 0 overflow to Receive Buffer 1
+
+    //RXB1CON: RECEIVE BUFFER 1 CONTROL REGISTER
+    //Mode 0
+    //RXFUL RXM1 RXM0 — RXRTRRO FILHIT2 FILHIT1 FILHIT0
+    RXB1CONbits.RXFUL = 0 ; 	//0 = Receive buffer is open to receive a new message
+    RXB1CONbits.RXM1 = 0 ; 		//11 = Receive all messages (including those with errors); filter criteria is ignored
+    RXB1CONbits.RXM0 = 0 ;
+
+    //configure transmit
+
+    TXB0CONbits.TXPRI1 = 1;
+    TXB0CONbits.TXPRI0 = 0;
+
+    TXB0SIDH = 0;
+    TXB0SIDL = 0;
+    TXB0EIDH = 0;
+    TXB0EIDL = 0;
+
+    TXB0DLC = 0X08;   // tx 8 bytes
+
+    //Setting in LoopBack Mode
+    CANCONbits.REQOP2 = 0 ;		//Request CAN Operation Mode bits
+    CANCONbits.REQOP1 = 1 ;		//000 normal mode
+    CANCONbits.REQOP0 = 0 ;
+    while(CANSTATbits.OPMODE2 & !(CANSTATbits.OPMODE1)) ;
+
+    //Setting in Normal Mode
+    CANCONbits.REQOP2 = 0 ;		//Request CAN Operation Mode bits
+    CANCONbits.REQOP1 = 0 ;		//000 normal mode
+    CANCONbits.REQOP0 = 0 ;
+
+    while(CANSTATbits.OPMODE2) ;
+}
+
+void ssp_init()
+{
+/*	TRISDbits.TRISD0 = 0 ;
+
+	TRISCbits.TRISC5 = 0 ;
+	TRISCbits.TRISC4 = 1 ;
+	TRISCbits.TRISC3 = 0 ;
+	//SYNC SERIAL PORT STATUS REGISTER
+	//SSPSTAT (7:SMP 6:CKE 5:D/A 4:P 3:S 2:R/W 1:UA 0:BF)
+	SSPSTATbits.SMP = 0 ; 	//Input data sampled at middle of data output time (Microwire®)
+	SSPSTATbits.CKE	= 1 ; 	//Data transmitted on falling edge of SCK (Microwire® default)
+	//SSPSTATbits.D_A 		//Read only bit Indicates that the last byte received or transmitted was data(1) or address(0)
+	//SSPSTATbits.P  		//Read only bit Indicates that a Stop bit has been detected last (1)
+	//SSPSTATbits.S			//Read only bit	Indicates that a Start bit has been detected last (1)
+	//SSPSTATbits.R_W			//Read only bit
+	//SSPSTATbits.UA 			//Read only bit
+	//SSPSTATbits.BF			//Read only bit
+
+	//SYNC SERIAL PORT CONTROL REGISTER
+	//SSPCON (7:WCOL 6:SSPOV 5:SSPEN 4:CKP 3:SSPM3 2:SSPM2 1:SSPM1 0:SSPM0)
+	SSPCON1bits.WCOL = 0	;	//No collision
+	SSPCON1bits.SSPOV = 0 ; 	//No overflow
+	SSPCON1bits.SSPEN = 1 ; 	//Enables serial port and configures SCK, SDO and SDI as serial port pins
+	SSPCON1bits.CKP = 1 ;	//Idle state for clock is a high level (Microwire® default)
+	SSPCON1bits.SSPM3 = 0 ;	//SPI Master mode, clock = FOSC/4 for 0000
+	SSPCON1bits.SSPM2 = 0 ;
+	SSPCON1bits.SSPM1 = 1 ;  //make it 1
+	SSPCON1bits.SSPM0 = 0 ;
+*/
+}
+
+void i2c_init()
+{
+    //MSSP Status Register
+    //SSPSTAT
+    SSPSTATbits.SMP = 0; //slew rate control enabled for High-Speed mode (400 kHz)
+    //SSPSTATbits.CKE = 1;
+
+    //MSSP Control Register 1
+    //SSPCONN1
+   //SSPCON1bits.WCOL
+    //SSPCON1bits.SSPOV
+    SSPCON1bits.SSPEN = 1;  // Enables the serail port
+    //SSPCON1bits.CKP
+    SSPCON1bits.SSPM3 = 1;  //0110 configures I2C in Maste mode
+    SSPCON1bits.SSPM2 = 0;
+    SSPCON1bits.SSPM1 = 0;
+    SSPCON1bits.SSPM0 = 0;
+
+
+    //MSSP Control Register 2
+    //SSPCONN2
+    //SSPCON2bits.GCEN =
+    //SSPCON2bits.ACKSTAT
+    //SSPCON2bits.ACKDT
+    SSPCON2bits.ACKEN = 0;
+    SSPCON2bits.RCEN = 0;
+    SSPCON2bits.PEN = 0;
+    SSPCON2bits.RSEN = 0;
+    SSPCON2bits.SEN = 0;
+    
+}
+
+
+void setint()
+{
+	//INTERRUPT CONTROL REGISTER 1
+	//INTCON (7:GIE/GIEH 6:PEIE/GIEL 5:TMR0IE 4:INT0IE 3:RBIE 2:TMR0IF 1:INT0IF 0:RBIF)
+	INTCON 	= 0b11100000 ;		//enable high and low priority int
+	//INTERRUPT CONTROL REGISTER 2
+	//INTCON2 (7:RBPU 6:INTEDG0 5:INTEDG1 4:INTEDG2 3:— 2:TMR0IP 1:— 0:RBIP)
+	INTCON2bits.RBPU = 0 ; 		//All PORTB pull-ups are disabled
+	INTCON2bits.INTEDG0 = 0 ;	//Interrupt 0 on rising edge
+	INTCON2bits.INTEDG1 = 0 ; 	//Interrupt 1 on rising edge
+	INTCON2bits.INTEDG2	= 0 ; 	//Interrupt 2 on rising edge
+	INTCON2bits.TMR0IP = 1;	//TMR0 Low Priority
+	INTCON2bits.RBIP = 0 ; 		//RB Port Change Interrupt Low Priority
+
+	//INTERRUPT CONTROL REGISTER 3
+	//INTCON2 (7:INT2IP 6:INT1IP 5:— 4:INT2IE 3:INT1IE 2:— 1:INT2IF 0:INT1IF)
+	INTCON3bits.INT2IP = 0 ;	//INT2 External Interrupt Priority Low
+	INTCON3bits.INT1IP = 0 ;	//INT1 External Interrupt Priority Low
+	INTCON3bits.INT2IE = 0 ;	//INT2 External Interrupt Enable
+	INTCON3bits.INT1IE = 0 ;	//INT1 External Interrupt Enable
+	INTCON3bits.INT2IF = 0 ;	//INT2 External Interrupt Flag bit
+	INTCON3bits.INT1IF = 0 ;	//INT1 External Interrupt Flag bit
+
+	//PIR1 — 7:PSPIF 6:ADIF 5:RCIF 4:TXIF 3:SSPIF 2:CCP1IF 1:TMR2IF 0:TMR1IF
+	PIR1	= 0b00000000 ;
+	//PIR3 — — — 4:PTIF 3:IC3DRIF 2:IC2QEIF 1:IC1IF 0:TMR5IF
+//	PIR3   &= 0X00 ;
+
+	//PIE1 — 7:PSPIE 6:ADIE 5:RCIE 4:TXIE 3:SSPIE 2:CCP1IE 1:TMR2IE 0:TMR1IE
+	PIE1 	= 0b00000001 ;
+//	PIE2 	= 0b00000000 ;
+
+	//PIE3: PERIPHERAL INTERRUPT ENABLE REGISTER 3
+	//7:IRXIE 6:WAKIE 5:ERRIE 4:TXB2IE 3:TXB1IE 2:TXB0IE 1:RXB1IE 0:RXB0IE
+	PIE3 	= 0b00000000 ;
+
+	//IPR1 — 7:PSPIP 6:ADIP 5:RCIP 4:TXIP 3:SSPIP 2:CCP1IP 1:TMR2IP 0:TMR1IP
+	IPR1 	= 0b00000000 ;
+//	IPR2 	= 0b00000000 ;
+	//IPR3: PERIPHERAL INTERRUPT PRIORITY REGISTER 3
+	//IRXIP WAKIP ERRIP TXB2IP TXB1IP TXB0IP RXB1IP RXB0IP
+	IPR3 	= 0b00000000 ;
+
+	RCON 	= 0b10000000 ;
+}
+
+
+
+void rs232(char rs232out)
+{
+    TXREG =  rs232out;
+    while(TXSTAbits.TRMT == 0 );
+}
+
+
+void bin_io()
+{
+    if(char_sample_ready)
+    {
+        TXREG = 'B';
+        while(TXSTAbits.TRMT == 0 );
+
+        
+        for(char_send_count = 0; char_send_count<20; char_send_count++)
+        {
+            TXREG = 0x1f ;
+            while(TXSTAbits.TRMT == 0 );
+            
+        }
+
+
+
+        // total 83 bytes sent
+        char_sample_ready = 0 ;
+    }
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------
+//high priority interrupt vector
+#pragma code InterruptVectorHigh = 0x08
+void InterruptVectorHigh (void)
+{
+  _asm
+    goto InterruptHandlerHigh //jump to interrupt routine
+  _endasm
+}
+
+//low priority interrupt vector
+#pragma code InterruptVectorLow = 0x18
+void InterruptVectorLow (void)
+{
+  _asm
+    goto InterruptHandlerLow //jump to interrupt Low routine
+  _endasm
+}
+//----------------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------------
+// High priority interrupt routine
+
+#pragma code
+#pragma interrupt InterruptHandlerHigh
+
+void InterruptHandlerHigh ()
+{
+    //Timer0 interrupt set to (inverse of 2500000/64/256) = 3.2768 ms
+    if(INTCONbits.TMR0IF)
+    {
+    //	T0CONbits.TMR0ON = 0 ;
+        INTCONbits.TMR0IF = 0;
+        char_counter++;      //interrupt loop counter
+
+        //----------------------------------------------------------------------------
+        //------------------------------------C A N ----------------------------------
+        //TXBnSIDH: TRANSMIT BUFFER n STANDARD IDENTIFIER REGISTERS
+        //SID10 SID9 SID8 SID7 SID6 SID5 SID4 SID3
+        TXB0SIDH = WEATHER40 ;
+        TXB0SIDH = TXB0SIDH>>3 ;
+
+        //TXBnSIDL: TRANSMIT BUFFER n STANDARD IDENTIFIER REGISTERS
+        //SID2 SID1 SID0 — EXIDE — EID17 EID16
+        TXB0SIDL = WEATHER40 ;
+        TXB0SIDL = TXB0SIDL<<5 ;
+
+        TXB0D0 = 0 ;
+        TXB0D1 = 0 ;
+        TXB0D2 = 0 ;
+        TXB0D3 = 0 ;
+        TXB0D4 = 0 ;
+        TXB0D5 = 0 ;
+        TXB0D6 = 0 ;
+        TXB0D7 = 0 ;
+
+        //TXBnCON: TRANSMIT BUFFER n CONTROL REGISTERS
+        //— TXABT TXLARB TXERR TXREQ — TXPRI1 TXPRI0
+        TXB0CON = 0x0f ;
+
+        //while( TXB0CONbits.TXREQ ) ;		//can transmission disabled
+
+        //bin_io();
+
+        //TMR0L = 0 ;
+        //TMR0H = 0 ;
+        //T0CONbits.TMR0ON = 1 ;
+
+        //-----------------------------------------------------------------
+        char_send_time++;		//BUFFERSIZE = 20 set of samples logged
+
+        if(char_send_time == char_sample_time)     //when 20 samples in a buffer are ready send corresponding buffer
+        {
+            
+            char_send_time = 0 ;
+            char_sample_ready = 1 ;          //ready to send
+        }
+        //----------------------------------------------------------------
+
+        PORTDbits.RD4 = !PORTDbits.RD4 ;
+        return ;
+    }
+}
+
+//----------------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------------
+// Low priority interrupt routine
+
+#pragma code
+#pragma interrupt InterruptHandlerLow
+
+void InterruptHandlerLow ()
+{
+    //Timer1 interrupt set to (inverse of 2500000/8/65536) = 209.72 ms
+    if(PIR1bits.TMR1IF)
+    {
+        TMR1H=0X0B;
+        TMR1L=0XE0;
+        PIR1bits.TMR1IF = 0 ;
+
+        bin_io();
+        PORTDbits.RD3 = !PORTDbits.RD3 ;
+    }
+}
+//---------------------------------------------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------------------------
+

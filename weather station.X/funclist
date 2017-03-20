@@ -1,0 +1,26 @@
+___awdiv: CODE, 5080 0 164
+_init: CODE, 4490 0 254
+_read_dsth01: CODE, 4744 0 168
+___ftpack: CODE, 4912 0 168
+___awmod: CODE, 5408 0 144
+_main: CODE, 6298 0 30
+_setint: CODE, 6108 0 66
+___lwtoft: CODE, 6228 0 36
+i2___awdiv: CODE, 5244 0 164
+_high_isr: CODE, 8 0 2288
+__initialization: CODE, 6174 0 48
+_bin_io: CODE, 2296 0 622
+i2___awmod: CODE, 5552 0 144
+_dsth01_out_init: CODE, 6352 0 2
+_i2c_write: CODE, 5956 0 80
+i2_bin_io: CODE, 2918 0 622
+_i2c_read: CODE, 5840 0 116
+___ftmul: CODE, 4196 0 294
+_rs232_init: CODE, 6328 0 22
+_i2c_init: CODE, 6264 0 34
+___awtoft: CODE, 6036 0 72
+___fttol: CODE, 3540 0 330
+_low_isr: CODE, 24 0 224
+___ftge: CODE, 5696 0 144
+___ftdiv: CODE, 3870 0 326
+Total: 6562
